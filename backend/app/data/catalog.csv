@@ -1,0 +1,60 @@
+name,website_url,career_url,ats_provider,ats_id,industry
+360Learning,https://360learning.com,https://jobs.lever.co/360learning,lever,360learning,Software
+Agicap,https://agicap.com,https://jobs.lever.co/agicap,lever,agicap,Finance
+Aircall,https://aircall.io,https://jobs.lever.co/aircall,lever,aircall,Software
+Alan,https://alan.com,https://jobs.ashbyhq.com/alan,ashby,alan,Assurance
+Algolia,https://www.algolia.com,https://job-boards.greenhouse.io/algolia,greenhouse,algolia,Software
+Alice & Bob,https://alice-bob.com,https://jobs.lever.co/alice-bob,lever,alice-bob,Deeptech
+Ankorstore,https://www.ankorstore.com,https://jobs.ashbyhq.com/ankorstore,ashby,ankorstore,E-commerce
+Artefact,https://www.artefact.com,https://job-boards.greenhouse.io/artefact,greenhouse,artefact,Data
+Back Market,https://www.backmarket.com,https://jobs.ashbyhq.com/backmarket,ashby,backmarket,E-commerce
+BlaBlaCar,https://www.blablacar.com,https://jobs.lever.co/blablacar,lever,blablacar,Mobilité
+Brevo,https://www.brevo.com,https://jobs.lever.co/brevo,lever,brevo,Software
+Contentsquare,https://contentsquare.com,https://jobs.lever.co/contentsquare,lever,contentsquare,Software
+Datadog,https://www.datadoghq.com,https://job-boards.greenhouse.io/datadog,greenhouse,datadog,Software
+Dataiku,https://www.dataiku.com,https://job-boards.greenhouse.io/dataiku,greenhouse,dataiku,Data
+Dataroots,https://dataroots.io,https://dataroots.recruitee.com,recruitee,dataroots,Data
+Didomi,https://www.didomi.io,https://jobs.lever.co/didomi,lever,didomi,Software
+Doctolib,https://www.doctolib.fr,https://job-boards.greenhouse.io/doctolib,greenhouse,doctolib,Santé
+Doctrine,https://www.doctrine.fr,https://jobs.lever.co/doctrine,lever,doctrine,Droit
+Dust,https://dust.tt,https://jobs.ashbyhq.com/dust,ashby,dust,IA
+Ekimetrics,https://ekimetrics.com,https://jobs.lever.co/ekimetrics,lever,ekimetrics,Data
+Equativ,https://equativ.com,https://jobs.lever.co/equativ,lever,equativ,AdTech
+Finary,https://finary.com,https://jobs.ashbyhq.com/finary,ashby,finary,Finance
+Gladia,https://www.gladia.io,https://jobs.ashbyhq.com/gladia,ashby,gladia,IA
+Gorgias,https://www.gorgias.com,https://jobs.ashbyhq.com/gorgias,ashby,gorgias,Software
+H Company,https://www.hcompany.ai,https://jobs.ashbyhq.com/hcompany,ashby,hcompany,IA
+Heetch,https://www.heetch.com,https://jobs.lever.co/heetch,lever,heetch,Mobilité
+Hiflow,https://www.hiflow.com,https://hiflow.recruitee.com,recruitee,hiflow,Mobilité
+Inato,https://www.inato.com,https://jobs.ashbyhq.com/inato,ashby,inato,Santé
+Ivalua,https://www.ivalua.com,https://job-boards.greenhouse.io/ivalua,greenhouse,ivalua,Software
+Ledger,https://www.ledger.com,https://jobs.ashbyhq.com/ledger,ashby,ledger,Cybersecurity
+Lifen,https://www.lifen.fr,https://jobs.ashbyhq.com/lifen,ashby,lifen,Santé
+Livestorm,https://livestorm.co,https://livestorm.recruitee.com,recruitee,livestorm,Software
+Malt,https://www.malt.com,https://jobs.lever.co/malt,lever,malt,RH
+Matera,https://matera.eu,https://matera.recruitee.com,recruitee,matera,Immobilier
+Mirakl,https://www.mirakl.com,https://job-boards.greenhouse.io/mirakl,greenhouse,mirakl,Software
+Nabla,https://www.nabla.com,https://jobs.ashbyhq.com/nabla,ashby,nabla,Santé
+Ogury,https://ogury.com,https://jobs.lever.co/ogury,lever,ogury,AdTech
+Owkin,https://www.owkin.com,https://jobs.ashbyhq.com/owkin,ashby,owkin,Santé
+Pennylane,https://www.pennylane.com,https://jobs.ashbyhq.com/pennylane,ashby,pennylane,Finance
+Photoroom,https://www.photoroom.com,https://jobs.ashbyhq.com/photoroom,ashby,photoroom,IA
+Pigment,https://www.pigment.com,https://jobs.lever.co/pigment,lever,pigment,Software
+Platform.sh,https://platform.sh,https://job-boards.greenhouse.io/platformsh,greenhouse,platformsh,Cloud
+Poolside,https://poolside.ai,https://jobs.ashbyhq.com/poolside,ashby,poolside,IA
+Qare,https://www.qare.fr,https://qare.recruitee.com,recruitee,qare,Santé
+Qonto,https://qonto.com,https://jobs.lever.co/qonto,lever,qonto,Finance
+Scaleway,https://www.scaleway.com,https://jobs.lever.co/scaleway,lever,scaleway,Cloud
+Sellsy,https://www.sellsy.com,https://sellsy.recruitee.com,recruitee,sellsy,Software
+Shift Technology,https://www.shift-technology.com,https://job-boards.greenhouse.io/shifttechnology,greenhouse,shifttechnology,IA
+Sorare,https://sorare.com,https://jobs.ashbyhq.com/sorare,ashby,sorare,Jeux vidéo
+Sunday,https://sundayapp.com,https://jobs.ashbyhq.com/sunday,ashby,sunday,Finance
+Swan,https://www.swan.io,https://jobs.ashbyhq.com/swan,ashby,swan,Finance
+Swile,https://www.swile.co,https://jobs.lever.co/swile,lever,swile,Finance
+Theodo,https://www.theodo.com,https://jobs.lever.co/theodo,lever,theodo,Conseil
+Upway,https://upway.co,https://upway.recruitee.com,recruitee,upway,Mobilité
+Veepee,https://www.veepee.fr,https://jobs.lever.co/veepee,lever,veepee,E-commerce
+Vestiaire Collective,https://www.vestiairecollective.com,https://jobs.lever.co/vestiairecollective,lever,vestiairecollective,E-commerce
+Voodoo,https://voodoo.io,https://jobs.ashbyhq.com/voodoo,ashby,voodoo,Jeux vidéo
+Younited,https://www.younited-credit.com,https://jobs.lever.co/younited,lever,younited,Finance
+Zenchef,https://www.zenchef.com,https://zenchef.recruitee.com,recruitee,zenchef,Software

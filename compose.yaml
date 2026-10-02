@@ -48,7 +48,7 @@ services:
       retries: 10
   worker:
     <<: *backend
-    command: celery -A app.tasks.celery worker --loglevel=info --concurrency=2
+    command: celery -A app.tasks.celery worker --loglevel=info --concurrency=4
     depends_on:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}

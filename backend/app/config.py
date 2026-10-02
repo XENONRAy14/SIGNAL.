@@ -11,6 +11,16 @@ class Settings(BaseSettings):
     seed_demo: bool = False
     openai_api_key: str = ''
     openai_model: str = 'gpt-4.1-mini'
+    seed_catalog: bool = True
+    ft_client_id: str = ''
+    ft_client_secret: str = ''
+    ft_departements: str = ''
+    ft_backfill_hours: int = 48
+    adzuna_app_id: str = ''
+    adzuna_app_key: str = ''
+    enable_arbeitnow: bool = True
+    aggregator_ttl_days: int = 30
+    discovery_batch: int = 40
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
 settings = Settings()

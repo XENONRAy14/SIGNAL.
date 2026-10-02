@@ -1,16 +1,71 @@
 """Bounded public-only HTTP, DNS pinning, robots.txt and distributed domain pacing."""
-import http.client, ipaddress, socket, ssl, time
+import http.client, ipaddress, logging, re, socket, ssl, time
+from dataclasses import dataclass, field
+from datetime import timedelta
 from urllib.parse import urlsplit, urljoin
-from urllib.robotparser import RobotFileParser
 from redis import Redis
 from ..config import settings
-from ..models import HttpCache, now
+from ..models import HttpCache, RobotsCache, now
 
 AGENT='SignalBot/0.1'
+TOKEN='signalbot'
 MAX_BYTES=8*1024*1024
+ROBOTS_TTL=timedelta(hours=24)
+ROBOTS_STALE=timedelta(days=30)
+ROBOTS_RETRY=timedelta(minutes=15)
+ALLOW,BLOCK,RETRY,UNKNOWN='allow','block','retry','unknown'
+log=logging.getLogger('signal.robots')
 
 class FetchError(Exception): pass
 class Blocked(FetchError): pass
+class RetryLater(FetchError): pass
+
+@dataclass
+class Robots:
+    """RFC 9309 rules: longest matching path wins, Allow wins ties, /robots.txt always allowed."""
+    rules: list = field(default_factory=list)
+    delay: float | None = None
+    state: str = 'parsed'
+
+    @classmethod
+    def parse(cls,body,state='parsed'):
+        groups=[]; agents=[]; rules=[]; delay=None; in_rules=False
+        for raw in body.splitlines():
+            line=raw.split('#',1)[0].strip()
+            if ':' not in line: continue
+            key,value=(x.strip() for x in line.split(':',1)); key=key.lower()
+            if key=='user-agent':
+                if in_rules: groups.append((agents,rules,delay)); agents,rules,delay=[],[],None
+                agents.append(value.lower()); in_rules=False
+            elif key in ('allow','disallow') and agents:
+                if value: rules.append((key=='allow',value))
+                in_rules=True
+            elif key=='crawl-delay' and agents:
+                try: delay=float(value)
+                except ValueError: pass
+                in_rules=True
+        if agents: groups.append((agents,rules,delay))
+        mine=[g for g in groups if any(a.split('/')[0]==TOKEN for a in g[0])] or [g for g in groups if '*' in g[0]]
+        return cls([r for g in mine for r in g[1]],next((g[2] for g in mine if g[2] is not None),None),state)
+
+    def allows(self,url):
+        p=urlsplit(url); path=(p.path or '/')+('?'+p.query if p.query else '')
+        if p.path=='/robots.txt': return True
+        best=None
+        for allow,pattern in self.rules:
+            regex='^'+re.escape(pattern).replace(r'\*','.*')
+            if regex.endswith(r'\$'): regex=regex[:-2]+'$'
+            if re.match(regex,path) and (best is None or len(pattern)>len(best[1]) or len(pattern)==len(best[1]) and allow):
+                best=(allow,pattern)
+        return best is None or best[0]
+
+def robots_state(status,body):
+    """Map the robots.txt fetch result to an RFC 9309 state, with production caution for 401/403/429."""
+    if status==200: return UNKNOWN if '<html' in body[:2000].lower() else 'parsed'
+    if status==429 or status>=500: return RETRY
+    if status in (401,403): return 'restricted'
+    if 400<=status<500: return 'absent'
+    return RETRY
 
 def public_url(url):
     try:
@@ -44,11 +99,11 @@ class SafeHTTP:
             self.redis.set(key,time.time()+max(2,min(delay,60)),ex=120)
 
     def _request(self,url,headers=None,robots_check=False,depth=0):
-        if depth>4: raise FetchError('Trop de redirections')
+        if depth>5: raise FetchError('Trop de redirections')
         p,ip=public_url(url)
         if robots_check: self.check_robots(url)
         rule=self.robots.get(p.scheme+'://'+p.netloc)
-        delay=rule.crawl_delay(AGENT) if rule else None
+        delay=rule.delay if rule else None
         if delay and delay>60: raise Blocked('Crawl-delay supérieur au budget du worker ; collecte suspendue')
         self.pace(p.hostname,delay or 2)
         conn=PinnedHTTPS(p.hostname,ip,p.port or 443) if p.scheme=='https' else http.client.HTTPConnection(ip,p.port or 80,timeout=15)
@@ -65,16 +120,43 @@ class SafeHTTP:
         except (OSError,http.client.HTTPException) as exc: raise FetchError('Échec réseau : '+type(exc).__name__) from exc
         finally: conn.close()
 
-    def check_robots(self,url):
+    def load_robots(self,origin):
+        cached=self.db.get(RobotsCache,origin); stamp=now()
+        if cached and cached.expires_at>stamp:
+            if cached.state==RETRY: raise RetryLater('robots.txt temporairement inaccessible ; nouvel essai plus tard')
+            return Robots.parse(cached.body if cached.state=='parsed' else '',cached.state)
+        try: status,_,body=self._request(origin+'/robots.txt')
+        except Blocked: raise
+        except FetchError: status,body=None,''
+        state=robots_state(status,body) if status else RETRY
+        if state==RETRY:
+            # RFC 9309: an unreachable robots.txt means full disallow, except a recent cached copy may be reused.
+            if cached and cached.state!=RETRY and stamp-cached.fetched_at<ROBOTS_STALE:
+                cached.expires_at=stamp+ROBOTS_RETRY; self.db.flush()
+                return Robots.parse(cached.body if cached.state=='parsed' else '',cached.state)
+            if not cached: cached=RobotsCache(origin=origin); self.db.add(cached)
+            cached.state=RETRY; cached.status_code=status; cached.body=''; cached.fetched_at=stamp; cached.expires_at=stamp+ROBOTS_RETRY; self.db.flush()
+            raise RetryLater(f'robots.txt inaccessible ({status or "réseau"}) ; nouvel essai plus tard')
+        if state==UNKNOWN: log.info('robots_unparsable origin=%s status=%s',origin,status)
+        if not cached: cached=RobotsCache(origin=origin); self.db.add(cached)
+        cached.state=state; cached.status_code=status; cached.body=body[:500000] if state=='parsed' else ''; cached.fetched_at=stamp; cached.expires_at=stamp+ROBOTS_TTL
+        self.db.flush()
+        return Robots.parse(cached.body,state)
+
+    def decide(self,url):
+        """Crawl decision for a URL: ALLOW, BLOCK, RETRY or UNKNOWN (unparsable file, treated as public access)."""
         p=urlsplit(url); origin=p.scheme+'://'+p.netloc
         if origin not in self.robots:
-            status,_,body=self._request(origin+'/robots.txt')
-            rule=RobotFileParser(); rule.set_url(origin+'/robots.txt')
-            if status==404: rule.parse(['User-agent: *','Allow: /'])
-            elif status==200: rule.parse(body.splitlines())
-            else: raise Blocked('robots.txt indisponible ; collecte suspendue')
-            self.robots[origin]=rule
-        if not self.robots[origin].can_fetch(AGENT,url): raise Blocked('Collecte interdite par robots.txt')
+            try: self.robots[origin]=self.load_robots(origin)
+            except RetryLater: return RETRY
+        rule=self.robots[origin]
+        if not rule.allows(url): return BLOCK
+        return UNKNOWN if rule.state==UNKNOWN else ALLOW
+
+    def check_robots(self,url):
+        decision=self.decide(url)
+        if decision==BLOCK: raise Blocked('Collecte interdite par robots.txt')
+        if decision==RETRY: raise RetryLater('robots.txt temporairement inaccessible ; nouvel essai plus tard')
 
     def get(self,url):
         self.pages+=1
@@ -86,6 +168,7 @@ class SafeHTTP:
             if cached.modified: headers['If-Modified-Since']=cached.modified
         status,h,body=self._request(url,headers,True)
         if status==304 and cached: return cached.body
+        if status==429 or status>=500: raise RetryLater('HTTP '+str(status)+' ; nouvel essai plus tard')
         if status!=200: raise FetchError('HTTP '+str(status))
         if any(x in body.lower() for x in ('cf-chl-','g-recaptcha','hcaptcha-response','verify you are human')):
             raise Blocked('Protection technique détectée ; aucune tentative de contournement')

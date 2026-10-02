@@ -7,11 +7,13 @@ from sqlalchemy import select,func,or_,delete,text
 from sqlalchemy.exc import IntegrityError
 from .config import settings
 from .db import get_db
-from .models import User,AuthSession,Company,Job,JobSource,CrawlRun,Resume,TailoredResume,SavedJob
+from .models import User,AuthSession,Company,Job,JobSource,CrawlRun,Resume,TailoredResume,SavedJob,SourceRun
 from .schemas import Credentials,Profile,CompanyInput,ResumeInput,TailorInput,SavedInput
 from .security import current_user,admin,passwords,dummy_hash,new_session,rate_limit,redis
 from .matching import match
 from .crawling.http import public_url,FetchError
+from .crawling.aggregators import SOURCES
+from .crawling.discovery import name_key
 from .resumes import extract_file,tailor,as_docx
 
 logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(name)s %(message)s')
@@ -123,6 +125,7 @@ def job_detail(job_id:str,user=Depends(current_user),db=Depends(get_db)):
     job=db.get(Job,job_id)
     if not job: raise HTTPException(404,'Offre introuvable')
     return {**serialize(job),'company':serialize(db.get(Company,job.company_id)),'match':match(user.profile,job),
+        'source_label':SOURCES[job.source].label if job.source in SOURCES else None,'attribution':SOURCES[job.source].attribution if job.source in SOURCES else None,
         'sources':[serialize(s) for s in db.scalars(select(JobSource).where(JobSource.job_id==job.id))]}
 
 @app.get('/api/saved')
@@ -156,8 +159,14 @@ def add_company(data:CompanyInput,user=Depends(admin),db=Depends(get_db)):
         p,_=public_url(data.website_url)
         if data.career_url: public_url(data.career_url)
     except FetchError as exc: raise HTTPException(400,str(exc))
-    company=Company(**data.model_dump(),domain=p.hostname.lower())
-    db.add(company)
+    # An employer already discovered through an aggregator is upgraded to a direct source instead of duplicated.
+    company=db.scalar(select(Company).where(Company.name_key==name_key(data.name),Company.ats_provider=='aggregated').limit(1))
+    if company:
+        for key,value in data.model_dump().items(): setattr(company,key,value)
+        company.domain=p.hostname.lower(); company.discovery_status='manual'; company.crawler_status='idle'
+    else:
+        company=Company(**data.model_dump(),domain=p.hostname.lower(),name_key=name_key(data.name),discovered_via='manual',discovery_status='manual')
+        db.add(company)
     try: db.commit()
     except IntegrityError: db.rollback(); raise HTTPException(409,'Cette entreprise est déjà suivie')
     return serialize(company)
@@ -182,6 +191,34 @@ def toggle(company_id:str,enabled:bool,user=Depends(admin),db=Depends(get_db)):
 def crawls(user=Depends(admin),db=Depends(get_db)):
     rows=db.execute(select(CrawlRun,Company.name).join(Company).order_by(CrawlRun.started_at.desc()).limit(100))
     return [{**serialize(run),'company':name} for run,name in rows]
+
+@app.get('/api/admin/sources')
+def sources(user=Depends(admin),db=Depends(get_db)):
+    def last(name): return db.scalar(select(SourceRun).where(SourceRun.source==name).order_by(SourceRun.started_at.desc()).limit(1))
+    active=dict(db.execute(select(Job.source,func.count()).where(Job.status=='active').group_by(Job.source)).all())
+    items=[{'name':n,'label':s.label,'configured':s.configured(),'interval_hours':s.interval.total_seconds()/3600,'active_jobs':active.get(n,0),
+        'last_run':serialize(r) if (r:=last(n)) else None} for n,s in SOURCES.items()]
+    discovery=dict(db.execute(select(Company.discovery_status,func.count()).where(Company.is_demo==False).group_by(Company.discovery_status)).all())
+    runs=[serialize(r) for r in db.scalars(select(SourceRun).order_by(SourceRun.started_at.desc()).limit(30))]
+    return {'sources':items,'discovery':discovery,'runs':runs}
+
+@app.post('/api/admin/sources/{name}/run',status_code=202)
+def run_source_now(name:str,user=Depends(admin)):
+    if name not in SOURCES: raise HTTPException(404,'Source inconnue')
+    if not SOURCES[name].configured(): raise HTTPException(400,'Source non configurée : ajoutez ses identifiants dans .env')
+    rate_limit('source-admin:'+user.id,10)
+    from .tasks import aggregate_source
+    try: aggregate_source.apply_async(args=[name],priority=0)
+    except Exception: raise HTTPException(503,'Queue indisponible. Vérifiez Redis et le worker.')
+    return {'queued':name}
+
+@app.post('/api/admin/discovery/run',status_code=202)
+def run_discovery_now(user=Depends(admin)):
+    rate_limit('discovery-admin:'+user.id,10)
+    from .tasks import discover_companies
+    try: discover_companies.apply_async(priority=0)
+    except Exception: raise HTTPException(503,'Queue indisponible. Vérifiez Redis et le worker.')
+    return {'queued':True}
 
 @app.get('/api/connectors')
 def connectors(user=Depends(current_user)):

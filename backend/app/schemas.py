@@ -24,7 +24,7 @@ class Profile(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     radius_km: int = Field(default=50, ge=1, le=20000)
     remote_types: list[Literal['remote','hybrid','onsite']] = Field(default_factory=list)
-    contracts: list[Literal['alternance','stage','CDI','CDD','graduate','freelance']] = Field(default_factory=list)
+    contracts: list[Literal['alternance','stage','CDI','CDD','intérim','graduate','freelance']] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list, max_length=30)
     seniority: str = Field(default='junior', max_length=60)
     preferences: str = Field(default='', max_length=2000)

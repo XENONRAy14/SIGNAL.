@@ -46,7 +46,7 @@ class Ashby(ATSAdapter):
 class Recruitee(ATSAdapter):
     def fetch(self,c,h):
         data=json.loads(h.get(f'https://{c.ats_id}.recruitee.com/api/offers/'))
-        return Batch([dict(external_id=j['id'],title=j['title'],source_url=j['careers_url'],description=j.get('description','')+' '+j.get('requirements',''),location=j.get('location'),city=j.get('city'),country=j.get('country'),employment_type=j.get('employment_type_code')) for j in data['offers']])
+        return Batch([dict(external_id=j['id'],title=j['title'],source_url=j['careers_url'],description=(j.get('description') or '')+' '+(j.get('requirements') or ''),location=j.get('location'),city=j.get('city'),country=j.get('country'),employment_type=j.get('employment_type_code')) for j in data['offers']])
 
 class SmartRecruiters(ATSAdapter):
     def fetch(self,c,h):

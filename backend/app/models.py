@@ -45,6 +45,10 @@ class Company(Base):
     active_jobs: Mapped[int] = mapped_column(default=0)
     enabled: Mapped[bool] = mapped_column(default=True)
     is_demo: Mapped[bool] = mapped_column(default=False)
+    name_key: Mapped[str | None] = mapped_column(String(200), index=True)
+    discovered_via: Mapped[str | None] = mapped_column(String(50))
+    discovery_status: Mapped[str] = mapped_column(String(30), default='pending', index=True)
+    discovery_checked_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 class Job(Base):
     __tablename__ = 'jobs'
@@ -123,6 +127,27 @@ class HttpCache(Base):
     modified: Mapped[str | None] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
     updated: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+class RobotsCache(Base):
+    __tablename__ = 'robots_cache'
+    origin: Mapped[str] = mapped_column(String(300), primary_key=True)
+    state: Mapped[str] = mapped_column(String(20))
+    status_code: Mapped[int | None]
+    body: Mapped[str] = mapped_column(Text, default='')
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+class SourceRun(Base):
+    __tablename__ = 'source_runs'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    source: Mapped[str] = mapped_column(String(50), index=True)
+    status: Mapped[str] = mapped_column(String(30), default='running')
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+    count: Mapped[int] = mapped_column(default=0)
+    companies: Mapped[int] = mapped_column(default=0)
+    cursor: Mapped[datetime | None] = mapped_column(DateTime)
+    error: Mapped[str | None] = mapped_column(Text)
 
 class Resume(Base):
     __tablename__ = 'resumes'

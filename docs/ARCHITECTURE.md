@@ -22,12 +22,12 @@ Tous les champs du modèle Job demandé existent. Les valeurs inconnues restent 
 
 ## Collecte
 
-1. Entreprise ajoutée par administrateur ou import CSV explicite. Pas de catalogue de milliers de sociétés inventé.
+1. Entreprise issue du catalogue vérifié, d’un agrégateur (découverte automatique), d’un ajout administrateur ou d’un import CSV.
 2. Sans page carrière : page d’accueil, liens, sitemap simple, chemins courants ; reconnaissance Greenhouse/Lever/Ashby/SmartRecruiters/Recruitee.
 3. Registry `ATSAdapter` : ajout d’un nouveau connecteur sans modifier l’orchestrateur.
 4. API publique prioritaire. Fallback conservateur sur JobPosting JSON-LD pour pages HTML ; pas de navigateur headless automatique.
 5. HTTP borné : 100 pages/crawl, 8 Mo/réponse, timeout 15 s, 4 redirections max, TLS vérifié, DNS épinglé à une IP publique.
-6. `robots.txt`, CAPTCHA/blocages respectés. Robots indisponible/401/403 : échec fermé, aucune tentative de contournement.
+6. `robots.txt` selon RFC 9309 (parseur maison : groupe d’agent le plus spécifique, règle la plus longue, `Allow` à égalité, `*` et `$`), décision ALLOW / BLOCK / RETRY / UNKNOWN, cache `robots_cache` 24 h. 404/410 : aucune restriction ; 401/403 : accès public seulement ; 429/5xx/réseau : `RetryLater` (retry Celery avec backoff), copie de moins de 30 jours réutilisable ; `Disallow` toujours respecté. CAPTCHA/blocages respectés, aucune tentative de contournement.
 7. Limitation globale par domaine, minimum 2 secondes ; Crawl-delay respecté jusqu’à 60 s (au-delà, la collecte est refusée).
 8. Requêtes conditionnelles. HTTP 304 réutilise le corps en cache ; hash évite les modifications de contenu inutiles.
 9. Transaction atomique : aucun job fermé lorsqu’un téléchargement, une pagination ou une normalisation échoue.
@@ -45,6 +45,15 @@ Tous les champs du modèle Job demandé existent. Les valeurs inconnues restent 
 | Workday, Teamtailor, SuccessFactors, Taleo | Points d’extension enregistrés, fallback JSON-LD | Non ; API dédiée non implémentée |
 
 Un board SmartRecruiters trop volumineux pour le budget produit une erreur sans fermeture d’annonces. Pagination incrémentale persistante et budgets par connecteur sont une évolution nécessaire pour les très gros boards.
+
+### Découverte automatique
+
+- `crawling/aggregators.py` : registre `Source` (France Travail, Adzuna, Arbeitnow). Chaque source produit des lots `(offres, curseur)` ; chaque lot est ingéré et commité, le curseur est conservé dans `source_runs`. Budget de 10 minutes par passage, reprise au cycle suivant.
+- France Travail : OAuth2 client credentials, fenêtres horaires sur `minCreationDate`/`maxCreationDate`. Plafond de 1 150 résultats par requête : découpage par département, puis par demi-fenêtre jusqu’à 10 minutes. Pagination 150 avec début ≤ 1000.
+- France Travail et Adzuna sont des API sous licence, appelées avec les identifiants de l’exploitant via un client borné (timeouts, sans redirection, backoff 429) ; les flux publics sans clé passent par `SafeHTTP` (robots, cadence, cache).
+- `crawling/discovery.py` : employeur retrouvé par `name_key` (nom normalisé sans forme juridique) puis domaine ; sinon créé avec `ats_provider='aggregated'` et un domaine synthétique `~clé`. Un employeur déjà suivi en direct avec succès ignore les offres d’agrégateur.
+- Sondage ATS par lots (5 min, plus gros employeurs d’abord) : site officiel si connu, puis identifiants dérivés du nom sur Greenhouse, Lever (global/EU), Ashby, Recruitee. Validation obligatoire : nom du board (Greenhouse), `company_name` (Recruitee) ou mention dans les descriptions (Lever, Ashby). Échec : nouvel essai après 30 jours ; aucune réponse définitive : reste en attente.
+- Les offres d’agrégateurs sont fermées après `AGGREGATOR_TTL_DAYS` sans nouvelle observation. Attribution affichée (source, date, lien d’origine).
 
 ### Cycle de vie et déduplication
 
@@ -86,4 +95,4 @@ Le cache HTTP peut contenir les coordonnées publiquement présentes dans une an
 
 ## Hors MVP
 
-Emails de vérification et récupération de mot de passe, SSO, facturation, alertes email/push, géocodage mondial, moteur vectoriel, ingestion automatique de répertoires de milliers d’entreprises, headless, OCR, connecteurs propriétaires authentifiés, tests de charge et haute disponibilité. Le code permet une base maintenable ; la capacité à l’échelle ne doit pas être affirmée sans mesure.
+Emails de vérification et récupération de mot de passe, SSO, facturation, alertes email/push, géocodage mondial, moteur vectoriel, headless, OCR, connecteurs propriétaires authentifiés, tests de charge et haute disponibilité. Le code permet une base maintenable ; la capacité à l’échelle ne doit pas être affirmée sans mesure.

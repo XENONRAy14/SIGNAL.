@@ -1,9 +1,15 @@
+import csv
+from pathlib import Path
+from urllib.parse import urlsplit
 from sqlalchemy import select
 from .db import SessionLocal
 from .models import User,Company,Job
 from .config import settings
 from .security import passwords
 from .crawling.normalize import normalize
+from .crawling.discovery import name_key
+
+CATALOG=Path(__file__).parent/'data'/'catalog.csv'
 
 DEMO=[
  ('Nova Systems','nova.example','Software','Développeur Full Stack — alternance','Paris','alternance','hybrid',['React','TypeScript','PostgreSQL'],48.8566,2.3522),
@@ -33,6 +39,25 @@ def seed():
                 desc=f'{name} recrute pour son équipe {sector}. Vous contribuerez à des projets concrets avec un accompagnement adapté aux profils juniors.\nCompétences recherchées : '+', '.join(skills)+'.\nMissions : contribuer à la conception, travailler en équipe, documenter et améliorer les solutions.\nCette annonce est une donnée fictive de démonstration ; aucune candidature réelle.'
                 data=normalize(dict(title=title,description=desc,source_url='https://'+domain+'/jobs/demo',external_id='demo',location=city,city=city,country='France',latitude=lat,longitude=lon,contract_type=contract,remote_type=remote,skills=skills,domain=sector,seniority='junior'),'demo')
                 db.add(Job(company_id=company.id,is_demo=True,**data))
+        for company in db.scalars(select(Company).where(Company.name_key.is_(None))):
+            company.name_key=name_key(company.name)
+            if company.is_demo: company.discovery_status='skip'
+        if settings.seed_catalog: load_catalog(db)
         db.commit()
+
+def load_catalog(db):
+    """Verified starter catalog (employer + public ATS board). Idempotent; existing domains or names are left untouched."""
+    with open(CATALOG,encoding='utf-8',newline='') as f:
+        for row in csv.DictReader(f):
+            key=name_key(row['name']); host=urlsplit(row['website_url']).hostname.lower()
+            existing=db.scalar(select(Company).where((Company.domain==host)|(Company.name_key==key)).limit(1))
+            if existing:
+                if existing.ats_provider=='aggregated' and not existing.is_demo:
+                    existing.ats_provider,existing.ats_id,existing.career_url=row['ats_provider'],row['ats_id'],row['career_url']
+                    existing.discovery_status='found'; existing.crawler_status='idle'
+                continue
+            db.add(Company(name=row['name'],name_key=key,domain=host,website_url=row['website_url'],career_url=row['career_url'],ats_provider=row['ats_provider'],ats_id=row['ats_id'],
+                industry=row['industry'] or 'Autre',country='France',discovered_via='catalog',discovery_status='found'))
+            db.flush()
 
 if __name__=='__main__': seed()

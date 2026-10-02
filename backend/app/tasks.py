@@ -8,13 +8,17 @@ from .db import SessionLocal
 from .models import Company,CrawlRun,AuthSession,now
 from .crawling.service import collect
 from .crawling.http import Blocked
+from .crawling.aggregators import SOURCES
+from .crawling.discovery import run_source, due, discover_batch
 
 log=logging.getLogger('signal.crawler')
 celery=Celery('signal',broker=settings.redis_url,backend=settings.redis_url)
 celery.conf.update(task_serializer='json',accept_content=['json'],result_serializer='json',timezone='UTC',
     task_acks_late=True,worker_prefetch_multiplier=1,task_soft_time_limit=840,task_time_limit=900,
     broker_connection_retry_on_startup=True,result_expires=3600,
-    beat_schedule={'schedule-due-companies':{'task':'signal.schedule','schedule':300.0}})
+    beat_schedule={'schedule-due-companies':{'task':'signal.schedule','schedule':300.0},
+        'schedule-aggregators':{'task':'signal.aggregate','schedule':600.0},
+        'discover-companies':{'task':'signal.discover','schedule':300.0}})
 r=Redis.from_url(settings.redis_url,socket_connect_timeout=3,socket_timeout=3)
 
 def enqueue(db,company):
@@ -62,7 +66,38 @@ def schedule():
             for run in db.scalars(select(CrawlRun).where(CrawlRun.status.in_(['queued','running','retry']),CrawlRun.started_at<now()-timedelta(hours=2))):
                 run.status='error'; run.error='Tâche expirée, replanification'; run.finished_at=now()
             db.execute(delete(AuthSession).where(AuthSession.expires<now())); db.commit()
-            companies=db.scalars(select(Company).where(Company.enabled==True,Company.is_demo==False).order_by(Company.active_jobs.desc())).all()
+            companies=db.scalars(select(Company).where(Company.enabled==True,Company.is_demo==False,Company.ats_provider!='aggregated').order_by(Company.active_jobs.desc())).all()
             for company in companies:
                 interval=timedelta(hours=6 if company.active_jobs else 24)
                 if company.last_crawl is None or now()-company.last_crawl>interval: enqueue(db,company)
+
+@celery.task(name='signal.aggregate')
+def aggregate():
+    with SessionLocal() as db:
+        for name in SOURCES:
+            if due(db,name): aggregate_source.apply_async(args=[name],priority=3)
+
+@celery.task(name='signal.aggregate_source')
+def aggregate_source(name):
+    # One run per source at a time; a partial backfill resumes from its cursor at the next cycle.
+    lock=r.lock('aggregate:'+name,timeout=900,blocking_timeout=1)
+    if not lock.acquire(blocking=True): return
+    try:
+        with SessionLocal() as db:
+            run=run_source(db,name)
+            log.info('source_run source=%s status=%s count=%d new_companies=%d',name,run.status,run.count,run.companies)
+    finally:
+        try: lock.release()
+        except Exception: pass
+
+@celery.task(name='signal.discover')
+def discover_companies():
+    lock=r.lock('discover:singleton',timeout=900,blocking_timeout=1)
+    if not lock.acquire(blocking=True): return
+    try:
+        with SessionLocal() as db:
+            result=discover_batch(db)
+            if result['checked']: log.info('discovery checked=%d found=%d',result['checked'],result['found'])
+    finally:
+        try: lock.release()
+        except Exception: pass

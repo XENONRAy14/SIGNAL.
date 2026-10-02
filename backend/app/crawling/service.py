@@ -5,12 +5,13 @@ from .normalize import normalize,hashstr,canonical_url
 from .adapters import adapter_for,discover
 from .http import SafeHTTP,FetchError
 
-def reconcile(db,company,raw_jobs,complete):
+def reconcile(db,company,raw_jobs,complete,provider=None):
     # Normalize the entire batch before changing state. Malformed data aborts atomically.
-    normalized=[normalize(raw,company.ats_provider) for raw in raw_jobs]
+    provider=provider or company.ats_provider
+    normalized=[normalize(raw,provider) for raw in raw_jobs]
     seen=set(); stamp=now()
     for data in normalized:
-        identity=hashstr(company.ats_provider+':'+str(data['external_id'])) if data['external_id'] else hashstr(data['source_url'])
+        identity=hashstr(provider+':'+str(data['external_id'])) if data['external_id'] else hashstr(data['source_url'])
         source=db.scalar(select(JobSource).where(JobSource.company_id==company.id,JobSource.identity==identity))
         job=db.get(Job,source.job_id) if source else None
         if not job:
@@ -27,7 +28,7 @@ def reconcile(db,company,raw_jobs,complete):
         job.last_seen=stamp; job.missing_count=0
         job.status='closed' if job.expiration_date and job.expiration_date<stamp else 'active'
         if not source:
-            source=JobSource(job_id=job.id,company_id=company.id,identity=identity,source=company.ats_provider,url=data['source_url'],external_id=data['external_id']); db.add(source)
+            source=JobSource(job_id=job.id,company_id=company.id,identity=identity,source=provider,url=data['source_url'],external_id=data['external_id']); db.add(source)
         source.last_seen=stamp; source.url=data['source_url']; seen.add(job.id)
     if complete:
         absent=db.scalars(select(Job).where(Job.company_id==company.id,Job.status!='closed',Job.is_demo==False)).all()
