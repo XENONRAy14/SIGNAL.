@@ -1,0 +1,5 @@
+export type Match={score:number|null; matched_skills:string[]; missing_skills:string[]; warnings:string[]; breakdown:{label:string;weight:number;value:number}[];distance_km:number|null};
+export type Job={id:string;title:string;company:string;company_id:string;domain:string;city:string|null;location:string|null;contract_type:string;remote_type:string;skills:string[];short_description:string;description:string;salary_min:number|null;salary_max:number|null;is_demo:boolean;status:string;source:string;source_url:string;first_seen:string;last_seen:string;match:Match;saved_stage:string|null};
+export type User={id:string;name:string;email:string;is_admin:boolean;csrf:string;profile:Record<string,any>;ai_available?:boolean};
+export type Company={id:string;name:string;industry:string;website_url:string;career_url:string|null;ats_provider:string;ats_id:string|null;active_jobs:number;crawler_status:string;is_demo:boolean;enabled:boolean;last_crawl:string|null;country:string|null;cities:string[]};
+export type Resume={id:string;name:string;text:string;created_at:string};
