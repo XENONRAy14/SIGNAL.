@@ -1,12 +1,13 @@
 import csv
 from pathlib import Path
 from urllib.parse import urlsplit
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from .db import SessionLocal
+from .geo import locate, is_france
 from .models import User,Company,Job
 from .config import settings
 from .security import passwords
-from .crawling.normalize import normalize
+from .crawling.normalize import normalize, detect_contract
 from .crawling.discovery import name_key
 
 CATALOG=Path(__file__).parent/'data'/'catalog.csv'
@@ -43,7 +44,24 @@ def seed():
             company.name_key=name_key(company.name)
             if company.is_demo: company.discovery_status='skip'
         if settings.seed_catalog: load_catalog(db)
+        reclassify(db)
         db.commit()
+
+def reclassify(db):
+    """Backfill contract detection and offline geocoding for stored offers; idempotent, only rows still missing data."""
+    rows=db.scalars(select(Job).where(Job.is_demo==False,or_(Job.contract_type=='unknown',Job.latitude.is_(None),Job.country=='FR'))).all()
+    for job in rows:
+        if job.contract_type=='unknown':
+            job.contract_type=detect_contract(job.title,job.employment_type,job.description)
+            job.apprenticeship=job.contract_type=='alternance'; job.internship=job.contract_type=='stage'
+            if job.contract_type in ('stage','alternance','graduate') and not job.seniority: job.seniority='junior'
+        if is_france(job.country): job.country='France'
+        if job.latitude is None:
+            name,lat,lon,france=locate(job.city,job.location,job.region,job.country)
+            if lat is not None: job.latitude,job.longitude,job.city=lat,lon,job.city or name
+            if france: job.country='France'
+    db.flush()
+    return len(rows)
 
 def load_catalog(db):
     """Verified starter catalog (employer + public ATS board). Idempotent; existing domains or names are left untouched."""

@@ -14,6 +14,8 @@ from .matching import match
 from .crawling.http import public_url,FetchError
 from .crawling.aggregators import SOURCES
 from .crawling.discovery import name_key
+from . import radar
+from .radar import with_coords
 from .resumes import extract_file,tailor,as_docx
 
 logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(name)s %(message)s')
@@ -72,7 +74,11 @@ def logout(request:Request,response:Response,user=Depends(current_user),db=Depen
 
 @app.put('/api/profile')
 def update_profile(data:Profile,user=Depends(current_user),db=Depends(get_db)):
-    user.profile=data.model_dump(); db.commit(); return user_public(user)
+    profile=data.model_dump(); old=user.profile or {}
+    # Coordinates follow the city unless the user entered their own for this same city.
+    if profile['city'] and (profile['latitude'] is None or profile['city']!=old.get('city') and (profile['latitude'],profile['longitude'])==(old.get('latitude'),old.get('longitude'))):
+        profile['latitude']=profile['longitude']=None; profile=with_coords(profile)
+    user.profile=profile; db.commit(); return user_public(user)
 
 @app.get('/api/account/export')
 def export_account(user=Depends(current_user),db=Depends(get_db)):
@@ -100,9 +106,10 @@ def stats(user=Depends(current_user),db=Depends(get_db)):
 
 @app.get('/api/jobs')
 def jobs(q:str=Query('',max_length=200),domain:str='',contract:str='',remote:str='',city:str='',status:str='active',
-        demo:str='all',sort:str='match',page:int=Query(1,ge=1),limit:int=Query(24,ge=1,le=100),
+        demo:str='all',sort:str='match',page:int=Query(1,ge=1),limit:int=Query(24,ge=1,le=100),use_profile:bool=True,
         user=Depends(current_user),db=Depends(get_db)):
     query=visible(select(Job).join(Company),Job)
+    profile=with_coords(user.profile)
     if q:
         escaped=q.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
         query=query.where(or_(Job.title.ilike('%'+escaped+'%',escape='\\'),Job.description.ilike('%'+escaped+'%',escape='\\'),Company.name.ilike('%'+escaped+'%',escape='\\')))
@@ -110,10 +117,12 @@ def jobs(q:str=Query('',max_length=200),domain:str='',contract:str='',remote:str
         if value: query=query.where(col==value)
     if city: query=query.where(Job.location.ilike('%'+city[:200]+'%'))
     if demo in ('real','demo'): query=query.where(Job.is_demo==(demo=='demo'))
+    unfiltered=query; applied=None
+    if use_profile: query,applied=radar.apply(query,user.profile)
     total=db.scalar(select(func.count()).select_from(query.subquery()))
     saved={x.job_id:x.stage for x in db.scalars(select(SavedJob).where(SavedJob.user_id==user.id))}
     companies={c.id:c for c in db.scalars(select(Company).where(Company.id.in_(select(Job.company_id).where(Job.id.in_(query.with_only_columns(Job.id))))))}
-    def item(job): return {**serialize(job,('description','content_hash','dedupe_key','requirements','responsibilities','nice_to_have')),'company':companies[job.company_id].name,'match':match(user.profile,job),'saved_stage':saved.get(job.id)}
+    def item(job): return {**serialize(job,('description','content_hash','dedupe_key','requirements','responsibilities','nice_to_have')),'company':companies[job.company_id].name,'match':match(profile,job),'saved_stage':saved.get(job.id)}
     query=query.order_by(Job.first_seen.desc(),Job.id)
     if sort=='match':
         # Explicit bounded candidate window. This avoids unbounded per-request Python ranking.
@@ -122,20 +131,22 @@ def jobs(q:str=Query('',max_length=200),domain:str='',contract:str='',remote:str
         items=candidates[(page-1)*limit:page*limit]; ranked_total=len(candidates)
     else:
         items=[item(j) for j in db.scalars(query.offset((page-1)*limit).limit(limit))]; ranked_total=total
-    return {'items':items,'total':total,'ranked_total':ranked_total,'page':page,'limit':limit,'ranking_window':2000 if sort=='match' else None}
+    return {'items':items,'total':total,'ranked_total':ranked_total,'page':page,'limit':limit,'ranking_window':2000 if sort=='match' else None,
+        'profile_filter':applied,'unfiltered_total':db.scalar(select(func.count()).select_from(unfiltered.subquery())) if applied and applied['active'] else total}
 
 @app.get('/api/jobs/{job_id}')
 def job_detail(job_id:str,user=Depends(current_user),db=Depends(get_db)):
     job=db.get(Job,job_id)
     if not job: raise HTTPException(404,'Offre introuvable')
-    return {**serialize(job),'company':serialize(db.get(Company,job.company_id)),'match':match(user.profile,job),
+    return {**serialize(job),'company':serialize(db.get(Company,job.company_id)),'match':match(with_coords(user.profile),job),
         'source_label':SOURCES[job.source].label if job.source in SOURCES else None,'attribution':SOURCES[job.source].attribution if job.source in SOURCES else None,
         'sources':[serialize(s) for s in db.scalars(select(JobSource).where(JobSource.job_id==job.id))]}
 
 @app.get('/api/saved')
 def saved(user=Depends(current_user),db=Depends(get_db)):
     rows=db.execute(select(SavedJob,Job,Company).join(Job,SavedJob.job_id==Job.id).join(Company,Job.company_id==Company.id).where(SavedJob.user_id==user.id).order_by(SavedJob.created_at.desc())).all()
-    return [{**serialize(s),'job':serialize(j),'company':c.name,'match':match(user.profile,j)} for s,j,c in rows]
+    profile=with_coords(user.profile)
+    return [{**serialize(s),'job':serialize(j),'company':c.name,'match':match(profile,j)} for s,j,c in rows]
 
 @app.put('/api/saved/{job_id}')
 def save(job_id:str,data:SavedInput,user=Depends(current_user),db=Depends(get_db)):
