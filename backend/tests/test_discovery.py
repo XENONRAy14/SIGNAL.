@@ -211,6 +211,17 @@ def test_discover_batch_keeps_pending_when_nothing_answers(db):
 
 # --- API -------------------------------------------------------------------------------------
 
+def test_demo_data_hidden_when_seed_demo_disabled(client,auth,db,monkeypatch):
+    demo=Company(name='Nova',domain='nova.example',website_url='https://nova.example',is_demo=True); db.add(demo); db.flush()
+    db.add(Job(company_id=demo.id,is_demo=True,**__import__('app.crawling.normalize',fromlist=['normalize']).normalize({'title':'Démo','source_url':'https://nova.example/jobs/demo','external_id':'demo'},'demo')))
+    ingest(db,'arbeitnow',[offer('Acme')],{}); db.commit()
+    monkeypatch.setattr('app.main.settings.seed_demo',True)
+    assert client.get('/api/jobs').json()['total']==2 and client.get('/api/companies').json()['total']==2
+    monkeypatch.setattr('app.main.settings.seed_demo',False)
+    stats=client.get('/api/stats').json()
+    assert client.get('/api/jobs').json()['total']==1 and client.get('/api/companies').json()['total']==1
+    assert stats['demo_jobs']==0 and stats['companies']==1 and stats['real_jobs']==1
+
 def test_admin_sources_and_upgrade_aggregated_company(client,auth,db,monkeypatch):
     assert client.get('/api/admin/sources').status_code==403
     user=db.get(User,auth['id']);user.is_admin=True;db.commit()

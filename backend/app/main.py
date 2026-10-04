@@ -85,20 +85,24 @@ def delete_account(response:Response,user=Depends(current_user),db=Depends(get_d
     for model in (TailoredResume,Resume,SavedJob,AuthSession): db.execute(delete(model).where(model.user_id==user.id))
     db.delete(user); db.commit(); response.delete_cookie('signal_session',path='/'); return {'ok':True}
 
+def visible(query,model):
+    # SEED_DEMO=false hides existing demo data everywhere without deleting it.
+    return query if settings.seed_demo else query.where(model.is_demo==False)
+
 @app.get('/api/stats')
 def stats(user=Depends(current_user),db=Depends(get_db)):
-    return {'active_jobs':db.scalar(select(func.count()).select_from(Job).where(Job.status=='active')),
+    return {'active_jobs':db.scalar(visible(select(func.count()).select_from(Job).where(Job.status=='active'),Job)),
         'real_jobs':db.scalar(select(func.count()).select_from(Job).where(Job.status=='active',Job.is_demo==False)),
-        'demo_jobs':db.scalar(select(func.count()).select_from(Job).where(Job.status=='active',Job.is_demo==True)),
-        'companies':db.scalar(select(func.count()).select_from(Company)),
+        'demo_jobs':db.scalar(select(func.count()).select_from(Job).where(Job.status=='active',Job.is_demo==True)) if settings.seed_demo else 0,
+        'companies':db.scalar(visible(select(func.count()).select_from(Company),Company)),
         'saved':db.scalar(select(func.count()).select_from(SavedJob).where(SavedJob.user_id==user.id)),
-        'domains':db.scalars(select(Job.domain).distinct().order_by(Job.domain)).all()}
+        'domains':db.scalars(visible(select(Job.domain).where(Job.status=='active'),Job).distinct().order_by(Job.domain)).all()}
 
 @app.get('/api/jobs')
 def jobs(q:str=Query('',max_length=200),domain:str='',contract:str='',remote:str='',city:str='',status:str='active',
         demo:str='all',sort:str='match',page:int=Query(1,ge=1),limit:int=Query(24,ge=1,le=100),
         user=Depends(current_user),db=Depends(get_db)):
-    query=select(Job).join(Company)
+    query=visible(select(Job).join(Company),Job)
     if q:
         escaped=q.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
         query=query.where(or_(Job.title.ilike('%'+escaped+'%',escape='\\'),Job.description.ilike('%'+escaped+'%',escape='\\'),Company.name.ilike('%'+escaped+'%',escape='\\')))
@@ -149,7 +153,7 @@ def unsave(job_id:str,user=Depends(current_user),db=Depends(get_db)):
 
 @app.get('/api/companies')
 def companies(q:str='',page:int=Query(1,ge=1),limit:int=Query(30,ge=1,le=100),user=Depends(current_user),db=Depends(get_db)):
-    query=select(Company).where(Company.name.ilike('%'+q[:200]+'%'))
+    query=visible(select(Company).where(Company.name.ilike('%'+q[:200]+'%')),Company)
     total=db.scalar(select(func.count()).select_from(query.subquery()))
     return {'items':[serialize(c) for c in db.scalars(query.order_by(Company.active_jobs.desc(),Company.name).offset((page-1)*limit).limit(limit))],'total':total}
 
